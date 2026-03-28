@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sub Agent Dashboard - Realtime</title>
+    <title>Agent App - Nishan Service</title>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getDatabase, ref, onValue, query, orderByChild, equalTo } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+        import { getDatabase, ref, onValue, push } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyCxk8X9g6vDEOC3ZAQlGSYxC-SESW2vamY",
@@ -20,89 +20,141 @@
 
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
+        let myId = "";
 
-        // --- Auto Login via URL ---
-        const urlParams = new URLSearchParams(window.location.search);
-        const agentIdFromUrl = urlParams.get('id');
-
-        window.onload = function() {
-            if(agentIdFromUrl) {
-                document.getElementById('loginId').value = agentIdFromUrl;
-                login();
-            }
+        window.login = () => {
+            const id = document.getElementById('lId').value.trim();
+            onValue(ref(db, 'agents/' + id), s => {
+                if(s.exists()) {
+                    myId = id; 
+                    document.getElementById('logSec').style.display='none';
+                    document.getElementById('mainSec').style.display='block';
+                    syncAgentData(); loadTodayReport();
+                } else alert("Invalid ID!");
+            }, { onlyOnce: true });
         };
 
-        window.login = function() {
-            const id = document.getElementById('loginId').value.trim();
-            onValue(ref(db, 'agents/' + id), (snapshot) => {
-                const agent = snapshot.val();
-                if(agent) {
-                    document.getElementById('loginDiv').style.display = 'none';
-                    document.getElementById('dashDiv').style.display = 'block';
-                    document.getElementById('nameDisp').innerText = agent.name;
-                    document.getElementById('balDisp').innerText = "Rs " + agent.commissionBalance.toFixed(2);
-                    loadTransactions(id);
-                } else { alert("මෙම ID එක පද්ධතියේ නැත!"); }
+        function syncAgentData() {
+            onValue(ref(db, 'agents/' + myId), s => {
+                if(s.exists()){
+                    document.getElementById('uName').innerText = s.val().name;
+                    document.getElementById('uBal').innerText = "Rs. " + s.val().commissionBalance.toFixed(2);
+                }
             });
+            // ලබාගත් කොමිස් (Settlements) එකතුව
+            onValue(ref(db, 'settlements'), snap => {
+                let totalSet = 0; const tbody = document.getElementById('uSettleBody'); tbody.innerHTML = '';
+                snap.forEach(sv => {
+                    const p = sv.val();
+                    if(p.agentId === myId) {
+                        totalSet += p.amount;
+                        tbody.innerHTML += `<tr><td>${new Date(p.date).toLocaleDateString()}</td><td style="color:#ffc107;">මුදල ලබාගත්තා</td><td style="text-align:right;">Rs. ${p.amount.toFixed(2)}</td></tr>`;
+                    }
+                });
+                document.getElementById('uTotalSettled').innerText = "Rs. " + totalSet.toFixed(2);
+            });
+        }
+
+        function loadTodayReport() {
+            const t = new Date(); const s = new Date(t.setHours(0,0,0,0)).getTime(); const e = new Date(t.setHours(23,59,59,999)).getTime();
+            fetchData(s, e, "අද දවසේ වාර්තාව");
+        }
+
+        window.getHistory = () => {
+            const sD = new Date(document.getElementById('sD').value).getTime();
+            const eD = new Date(document.getElementById('eD').value).setHours(23,59,59);
+            fetchData(sD, eD, "පරණ වාර්තා");
         };
 
-        function loadTransactions(agentId) {
-            const transRef = query(ref(db, 'transactions'), orderByChild('agentId'), equalTo(agentId));
-            onValue(transRef, (snapshot) => {
-                const data = snapshot.val();
-                const tbody = document.getElementById('transTable');
-                tbody.innerHTML = '';
-                if(!data) return;
-
-                let transArray = Object.values(data).sort((a,b) => new Date(b.date) - new Date(a.date));
-
-                transArray.forEach(t => {
-                    tbody.innerHTML += `
-                        <tr>
-                            <td>${new Date(t.date).toLocaleDateString()}</td>
-                            <td style="color:${t.type=='Deposit'?'#00c853':'#2196f3'}">${t.type}</td>
-                            <td>${t.amount}</td>
-                            <td style="color:#00c853">+${t.commission.toFixed(2)}</td>
-                        </tr>`;
+        function fetchData(start, end, title) {
+            onValue(ref(db, 'transactions'), snap => {
+                const tbody = document.getElementById('uRepBody');
+                document.getElementById('repTitle').innerText = title; tbody.innerHTML = '';
+                let list = [];
+                snap.forEach(c => {
+                    const t = c.val(); const tt = new Date(t.date).getTime();
+                    if(t.agentId === myId && tt >= start && tt <= end) list.push(t);
+                });
+                list.sort((a,b) => new Date(b.date) - new Date(a.date)).forEach(t => {
+                    tbody.innerHTML += `<tr><td>${new Date(t.date).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</td><td style="color:#ffc107;">ID: ${t.bettingId}</td><td style="color:${t.type==='Deposit'?'#4caf50':'#2196f3'}">${t.type}</td><td style="color:#00c853">+${t.commission.toFixed(2)}</td></tr>`;
                 });
             });
         }
+
+        window.openChat = () => {
+            document.getElementById('cPopup').style.display = 'flex';
+            onValue(ref(db, `chats/${myId}`), s => {
+                const box = document.getElementById('uChatBox'); box.innerHTML = '';
+                s.forEach(c => {
+                    const m = c.val(); const al = m.sender === 'Agent' ? 'flex-end' : 'flex-start';
+                    box.innerHTML += `<div style="align-self:${al}; background:${m.sender==='Agent'?'#00a650':'#233e4d'}; padding:10px; border-radius:12px; margin:5px; max-width:75%; font-size:14px;">${m.text}</div>`;
+                });
+                box.scrollTop = box.scrollHeight;
+            });
+        };
+
+        window.sendUserMsg = () => {
+            const txt = document.getElementById('uMsg').value; if(!txt) return;
+            push(ref(db, `chats/${myId}`), { sender: 'Agent', text: txt, date: new Date().toISOString() });
+            document.getElementById('uMsg').value = '';
+        };
     </script>
     <style>
-        :root { --p: #00a650; --bg: #0b1a20; --c: #152b36; }
-        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: white; padding: 20px; margin:0; }
-        .card { background: var(--c); padding: 25px; border-radius: 15px; max-width: 500px; margin: auto; box-shadow: 0 10px 25px rgba(0,0,0,0.5); border: 1px solid #233e4d; }
-        input, button { width: 100%; padding: 14px; margin: 10px 0; border-radius: 10px; border: none; font-size: 16px; box-sizing: border-box; }
-        button { background: var(--p); color: white; font-weight: bold; cursor: pointer; }
-        .bal-box { background: rgba(255,193,7,0.1); border: 1px solid #ffc107; padding: 20px; border-radius: 12px; margin: 20px 0; }
-        .bal-box h1 { font-size: 35px; color: #ffc107; margin: 0; }
-        table { width: 100%; font-size: 14px; border-collapse: collapse; margin-top: 20px; }
-        th, td { border-bottom: 1px solid #233e4d; padding: 12px; text-align: left; }
-        th { color: #8899a6; font-weight: normal; }
+        :root { --bg: #0b1a20; --card: #152b36; --p: #00a650; }
+        body { font-family: sans-serif; background: var(--bg); color: white; margin: 0; padding: 0; }
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 25px 15px; background: var(--card); border-bottom: 2px solid var(--p); position: sticky; top: 0; }
+        .agent-name { font-size: 20px; font-weight: 800; text-transform: uppercase; color: white; }
+        .chat-btn-box { width: 45px; height: 45px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 12px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+        .card { background: var(--card); padding: 15px; border-radius: 15px; margin: 15px; border: 1px solid #233e4d; }
+        .bal-val { font-size: 24px; color: #ffc107; font-weight: bold; }
+        .scroll-area { max-height: 250px; overflow-y: auto; background: rgba(0,0,0,0.2); border-radius: 10px; margin-top: 10px; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        td { padding: 12px 5px; border-bottom: 1px solid #233e4d; }
+        input, button { width: 100%; padding: 12px; margin: 5px 0; border-radius: 10px; border: none; }
+        #logSec { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; padding: 20px; }
     </style>
 </head>
 <body>
-    <div id="loginDiv" class="card" style="margin-top: 50px;">
-        <h2 style="color:var(--p)">Sub Agent Login</h2>
-        <input id="loginId" placeholder="ඔබගේ User ID එක">
-        <button onclick="login()">Dashboard එකට යන්න</button>
+    <div id="logSec">
+        <h1 style="color:var(--p);">NISHAN SERVICE</h1>
+        <input id="lId" placeholder="USER ID" style="text-align:center; background:var(--card); color:white;">
+        <button onclick="login()" style="background:var(--p); color:white; font-weight:bold;">LOGIN</button>
     </div>
 
-    <div id="dashDiv" style="display:none;">
+    <div id="mainSec" style="display:none;">
+        <div class="header">
+            <div id="uName" class="agent-name">---</div>
+            <div class="chat-btn-box" onclick="openChat()">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="white"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
+            </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin:15px;">
+            <div class="card" style="margin:0; text-align:center; border-top: 3px solid #ffc107;">
+                <div style="font-size:10px; color:#8899a6;">ලබාගත් කොමිස්</div>
+                <div id="uTotalSettled" style="font-size:18px; color:#ffc107; font-weight:bold;">Rs. 0.00</div>
+            </div>
+            <div class="card" style="margin:0; text-align:center; border-top: 3px solid #00a650;">
+                <div style="font-size:10px; color:#8899a6;">දැනට ඉතිරි කොමිස්</div>
+                <div id="uBal" style="font-size:18px; color:#00a650; font-weight:bold;">Rs. 0.00</div>
+            </div>
+        </div>
+
+        <div class="card"><h3 style="margin:0; color:#ffc107; font-size:14px;">ලබාගත් කොමිස් වාර්තා</h3><div class="scroll-area" style="max-height:120px;"><table><tbody id="uSettleBody"></tbody></table></div></div>
+        <div class="card"><h3 id="repTitle" style="margin:0; color:#4caf50;">අද වාර්තාව</h3><div class="scroll-area"><table><tbody id="uRepBody"></tbody></table></div></div>
+
         <div class="card">
-            <h2 id="nameDisp">---</h2>
-            <p style="color:#8899a6; margin:0;">ඔබගේ දැනට පවතින කොමිස් මුදල</p>
-            <div class="bal-box">
-                <h1 id="balDisp">Rs 0.00</h1>
-            </div>
-            <h3>පසුගිය ගනුදෙනු</h3>
-            <div style="overflow-x:auto;">
-                <table>
-                    <thead><tr><th>දිනය</th><th>වර්ගය</th><th>මුදල</th><th>කොමිස්</th></tr></thead>
-                    <tbody id="transTable"></tbody>
-                </table>
-            </div>
-            <button onclick="location.reload()" style="background:#222; margin-top:20px; font-size:12px;">Refresh Data</button>
+            <h3 style="margin:0; color:#2196f3;">පරණ වාර්තා සෙවීම</h3>
+            <div style="display:flex; gap:5px;"><input type="date" id="sD" style="background:#0b1a20; color:white;"><input type="date" id="eD" style="background:#0b1a20; color:white;"></div>
+            <button onclick="getHistory()" style="background:#2196f3; color:white;">Search History</button>
+        </div>
+    </div>
+
+    <div id="cPopup" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.9); z-index:2000; flex-direction:column; justify-content: flex-end;">
+        <div style="background:#152b36; width:100%; height:80%; border-radius:25px 25px 0 0; display:flex; flex-direction:column; padding:20px; box-sizing:border-box;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:10px;"><h3 style="margin:0;">Manager Chat</h3><button onclick="document.getElementById('cPopup').style.display='none'" style="width:auto; background:none; color:red;">CLOSE</button></div>
+            <div id="uChatBox" style="flex:1; overflow-y:auto; display:flex; flex-direction:column; padding:10px 0;"></div>
+            <div style="display:flex; gap:10px;"><input id="uMsg" placeholder="Type here..." style="background:#0b1a20; color:white;"><button onclick="sendUserMsg()" style="width:70px; background:var(--p); color:white;">SEND</button></div>
         </div>
     </div>
 </body>
