@@ -22,16 +22,30 @@
         const db = getDatabase(app);
         let myId = "";
 
+        window.onload = () => {
+            const savedId = localStorage.getItem('nishanAgentId');
+            if(savedId) {
+                document.getElementById('lId').value = savedId;
+                window.login();
+            }
+        };
+
         window.login = () => {
             const id = document.getElementById('lId').value.trim();
             onValue(ref(db, 'agents/' + id), s => {
                 if(s.exists()) {
-                    myId = id; 
+                    myId = id;
+                    localStorage.setItem('nishanAgentId', id);
                     document.getElementById('logSec').style.display='none';
                     document.getElementById('mainSec').style.display='block';
                     syncAgentData(); loadTodayReport();
                 } else alert("Invalid ID!");
             }, { onlyOnce: true });
+        };
+
+        window.logout = () => {
+            localStorage.removeItem('nishanAgentId');
+            location.reload();
         };
 
         function syncAgentData() {
@@ -41,7 +55,6 @@
                     document.getElementById('uBal').innerText = "Rs. " + s.val().commissionBalance.toFixed(2);
                 }
             });
-            // ලබාගත් කොමිස් (Settlements) එකතුව
             onValue(ref(db, 'settlements'), snap => {
                 let totalSet = 0; const tbody = document.getElementById('uSettleBody'); tbody.innerHTML = '';
                 snap.forEach(sv => {
@@ -76,7 +89,13 @@
                     if(t.agentId === myId && tt >= start && tt <= end) list.push(t);
                 });
                 list.sort((a,b) => new Date(b.date) - new Date(a.date)).forEach(t => {
-                    tbody.innerHTML += `<tr><td>${new Date(t.date).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</td><td style="color:#ffc107;">ID: ${t.bettingId}</td><td style="color:${t.type==='Deposit'?'#4caf50':'#2196f3'}">${t.type}</td><td style="color:#00c853">+${t.commission.toFixed(2)}</td></tr>`;
+                    const rateShow = t.rate ? t.rate : (t.type === 'Deposit' ? '3%' : '1%');
+                    tbody.innerHTML += `<tr>
+                        <td>${new Date(t.date).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</td>
+                        <td style="color:#ffc107;"><small style="color:#8899a6;">${t.type} (${rateShow})</small><br>ID: ${t.bettingId}</td>
+                        <td style="text-align:right; font-weight:bold;">${t.amount.toFixed(0)}</td>
+                        <td style="color:#00c853; text-align:right;">+${t.commission.toFixed(2)}</td>
+                    </tr>`;
                 });
             });
         }
@@ -103,10 +122,9 @@
         :root { --bg: #0b1a20; --card: #152b36; --p: #00a650; }
         body { font-family: sans-serif; background: var(--bg); color: white; margin: 0; padding: 0; }
         .header { display: flex; justify-content: space-between; align-items: center; padding: 25px 15px; background: var(--card); border-bottom: 2px solid var(--p); position: sticky; top: 0; }
-        .agent-name { font-size: 20px; font-weight: 800; text-transform: uppercase; color: white; }
+        .agent-name { font-size: 18px; font-weight: 800; text-transform: uppercase; color: white; }
         .chat-btn-box { width: 45px; height: 45px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 12px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
         .card { background: var(--card); padding: 15px; border-radius: 15px; margin: 15px; border: 1px solid #233e4d; }
-        .bal-val { font-size: 24px; color: #ffc107; font-weight: bold; }
         .scroll-area { max-height: 250px; overflow-y: auto; background: rgba(0,0,0,0.2); border-radius: 10px; margin-top: 10px; }
         table { width: 100%; border-collapse: collapse; font-size: 12px; }
         td { padding: 12px 5px; border-bottom: 1px solid #233e4d; }
@@ -124,8 +142,11 @@
     <div id="mainSec" style="display:none;">
         <div class="header">
             <div id="uName" class="agent-name">---</div>
-            <div class="chat-btn-box" onclick="openChat()">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="white"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
+            <div style="display:flex; gap:10px;">
+                <div class="chat-btn-box" onclick="openChat()">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="white"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
+                </div>
+                <button onclick="logout()" style="width:auto; background:#ff5252; padding:5px 10px; font-size:10px;">Logout</button>
             </div>
         </div>
 
@@ -141,7 +162,19 @@
         </div>
 
         <div class="card"><h3 style="margin:0; color:#ffc107; font-size:14px;">ලබාගත් කොමිස් වාර්තා</h3><div class="scroll-area" style="max-height:120px;"><table><tbody id="uSettleBody"></tbody></table></div></div>
-        <div class="card"><h3 id="repTitle" style="margin:0; color:#4caf50;">අද වාර්තාව</h3><div class="scroll-area"><table><tbody id="uRepBody"></tbody></table></div></div>
+        <div class="card">
+            <h3 id="repTitle" style="margin:0; color:#4caf50;">අද වාර්තාව</h3>
+            <div class="scroll-area">
+                <table>
+                    <thead>
+                        <tr style="color:#8899a6; font-size:10px;">
+                            <th>වෙලාව</th><th>විස්තර (%)</th><th style="text-align:right;">Amount</th><th style="text-align:right;">Comm</th>
+                        </tr>
+                    </thead>
+                    <tbody id="uRepBody"></tbody>
+                </table>
+            </div>
+        </div>
 
         <div class="card">
             <h3 style="margin:0; color:#2196f3;">පරණ වාර්තා සෙවීම</h3>
